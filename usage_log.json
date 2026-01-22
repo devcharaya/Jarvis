@@ -1,0 +1,10 @@
+[
+  {
+    "command": "open notepad",
+    "hour": 13
+  },
+  {
+    "command": "open notepad",
+    "hour": 21
+  }
+]
