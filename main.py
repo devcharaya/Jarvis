@@ -21,7 +21,9 @@ import threading
 import voice_auth
 import pin_auth
 import security_state
-
+from secure_storage import encrypt
+from secure_storage import decrypt
+from secure_actions import execute_secure_action
 
 
 
@@ -33,6 +35,7 @@ WAITING_FOR_COMMAND = False
 IDLE_THRESHOLD_SECONDS = 30
 WAITING_FOR_PIN = False
 PENDING_SECURE_ACTION = None
+EMAIL_PIN_VERIFIED = False
 
 
 USAGE_LOG_FILE = "usage_log.json"
@@ -65,26 +68,13 @@ def lock_pc():
     speak("Locking the system")
     os.system("rundll32.exe user32.dll,LockWorkStation")
 
-def restart_pc():
-    speak("Restarting the system")
-    os.system("shutdown /r /t 5")
-
-def shutdown_pc():
-    speak("Shutting down the system")
-    os.system("shutdown /s /t 5")
 
 def list_processes():
     for proc in psutil.process_iter(['pid', 'name']):
         print(proc.info)
     speak("Running processes listed on screen")
 
-def kill_process(name):
-    for proc in psutil.process_iter(['name']):
-        if name.lower() in proc.info['name'].lower():
-            proc.kill()
-            speak(f"Process {name} terminated")
-            return
-    speak("Process not found")
+
 
 def take_screenshot():
     file = "screenshot.png"
@@ -209,13 +199,7 @@ def open_folder(name):
     else:
         speak("Folder not found")
 
-def delete_file(name):
-    path = os.path.join(BASE_DIR, name)
-    if os.path.exists(path):
-        os.remove(path)
-        speak(f"File {name} deleted")
-    else:
-        speak("File not found")
+
 
 def find_file(name):
     for root, dirs, files in os.walk(BASE_DIR):
@@ -280,13 +264,12 @@ def save_usage_log(logs):
 
 
 
-
 def log_command(command):
     logs = load_usage_log()
     hour = datetime.now().hour
 
     logs.append({
-        "command": command,
+        "command": encrypt(command),
         "hour": hour
     })
 
@@ -297,7 +280,7 @@ def analyze_habits():
     stats = {}
 
     for log in logs:
-        command = log["command"]
+        command = decrypt(log["command"])
         hour = log["hour"]
         key = (command, hour)
 
@@ -366,9 +349,12 @@ def build_prompt(user_text):
 
 def go_to_sleep():
     global WAITING_FOR_COMMAND
+    global EMAIL_PIN_VERIFIED
     WAITING_FOR_COMMAND = False
+    EMAIL_PIN_VERIFIED = False   # 🔐 reset email permission
     voice_auth.reset_session()
     print("[SYSTEM]: Jarvis sleeping.")
+
 
 
 
@@ -387,6 +373,7 @@ def main():
     global PENDING_EMAIL   
     global WAITING_FOR_COMMAND   
     global WAITING_FOR_PIN
+    
 
     speak(config.WAKE_MESSAGE)
     active = False
@@ -430,9 +417,14 @@ def main():
                 # simulate active state
                 active = True
 
-        if not PENDING_HABIT_ACTION and not PENDING_EMAIL:
-            habit_suggestions()
-
+        if (
+                not active and
+                not WAITING_FOR_COMMAND and
+                not PENDING_HABIT_ACTION and
+                not PENDING_EMAIL and
+                is_idle()
+            ):
+               habit_suggestions()
         
         if text:
             LAST_USER_INTERACTION = time.time()
@@ -445,39 +437,34 @@ def main():
             continue
             
         text = text.lower().strip()# 🔐 HANDLE PIN INPUT FIRST
+        command_handled = False
+
         if WAITING_FOR_PIN:
             pin = text.strip()
 
             if pin_auth.verify_pin(pin):
                 speak("Access granted.")
-                action, value = PENDING_SECURE_ACTION
 
-                if action == "delete":
-                    delete_file(value)
-                elif action == "shutdown":
-                    shutdown_pc()
-                elif action == "restart":
-                    restart_pc()
-                elif action == "kill":
-                    kill_process(value)
-                elif action == "email":
-                    # email send logic later
-                    pass
+                if PENDING_SECURE_ACTION[0] == "email":
+                    EMAIL_PIN_VERIFIED = True
+                    speak("I have prepared the email. Say yes to send it.")
+                else:
+                    execute_secure_action(*PENDING_SECURE_ACTION)
 
             else:
-                if pin_auth.is_locked():
-                    speak("Too many attempts. Access locked for one minute.")
-                else:
-                    speak("Access denied.")
-
+                speak("Access denied.")
+                EMAIL_PIN_VERIFIED = False
+                
             WAITING_FOR_PIN = False
             PENDING_SECURE_ACTION = None
             active = False
             continue
 
+
         
         # exit to stop (ONLY ONE CHECK NEEDED - works anytime)
         if "exit" in text or "stop" in text or "goodbye" in text:
+            EMAIL_PIN_VERIFIED = False
             speak(config.EXIT_MESSAGE)
             tray_manager.JARVIS_ACTIVE = False
             active = False
@@ -530,6 +517,7 @@ def main():
         if "hello" in text:
             print("Command detected: HELLO")
             greet()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -537,6 +525,7 @@ def main():
         elif "time" in text:
             print("Command detected: TIME")
             tell_time()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -544,6 +533,7 @@ def main():
         elif "date" in text:
             print("Command detected: DATE")
             tell_date()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -551,6 +541,7 @@ def main():
         elif "day" in text:
             print("Command detected: DAY")
             tell_day()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -558,6 +549,7 @@ def main():
         elif "open notepad" in text:
             open_notepad()
             log_command("open notepad")   
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -565,6 +557,7 @@ def main():
         elif "open calculator" in text or "open calc" in text:
             print("Command detected: OPEN CALCULATOR")
             open_calculator()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -573,6 +566,7 @@ def main():
         elif "cpu" in text:
             print("Command detected: CPU USAGE")
             cpu_usage()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -581,6 +575,7 @@ def main():
         elif "ram" in text or "memory" in text:
             print("Command detected: RAM USAGE")
             ram_usage()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -589,6 +584,7 @@ def main():
         elif "battery" in text:
             print("Command detected: BATTERY STATUS")
             battery_status()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -597,6 +593,7 @@ def main():
             print("Command detected: GOOGLE SEARCH")
             query = text.replace("search google for", "").strip()
             google_search(query)
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -607,6 +604,7 @@ def main():
             print("Command detected: YOUTUBE SEARCH")
             query = text.replace("youtube search", "").strip()
             youtube_search(query)
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -617,6 +615,7 @@ def main():
             print("Command detected: WIKIPEDIA SEARCH")
             query = text.replace("wikipedia", "").strip()
             wikipedia_search(query)
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -627,6 +626,7 @@ def main():
             print("Command detected: PLAY SONG")
             song = text.replace("play song", "").strip()
             play_song(song)
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -634,6 +634,7 @@ def main():
         elif "create folder" in text:
             folder = text.replace("create folder", "").strip()
             create_folder(folder)
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -642,6 +643,7 @@ def main():
 
         elif "list files" in text:
             list_files()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -651,6 +653,7 @@ def main():
         elif "open folder" in text:
             folder = text.replace("open folder", "").strip()
             open_folder(folder)
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -668,6 +671,7 @@ def main():
                 "delete",
                 text.replace("delete file", "").strip()
             )
+            command_handled = True
             active = False
 
 
@@ -676,6 +680,7 @@ def main():
         elif "find file" in text:
             file = text.replace("find file", "").strip()
             find_file(file)
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -684,6 +689,7 @@ def main():
 
         elif "lock pc" in text:
             lock_pc()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -694,6 +700,7 @@ def main():
             speak("This action is protected. Please say your PIN.")
             WAITING_FOR_PIN = True
             PENDING_SECURE_ACTION = ("restart", None)
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -703,11 +710,13 @@ def main():
             speak("This action is protected. Please say your PIN.")
             WAITING_FOR_PIN = True
             PENDING_SECURE_ACTION = ("shutdown", None)
+            command_handled = True
             active = False
 
 
         elif "list processes" in text:
             list_processes()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -718,6 +727,7 @@ def main():
             speak("This action is protected. Please say your PIN.")
             WAITING_FOR_PIN = True
             PENDING_SECURE_ACTION = ("kill", name)
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -725,6 +735,7 @@ def main():
 
         elif "take screenshot" in text:
             take_screenshot()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -732,6 +743,7 @@ def main():
 
         elif "minimise all" in text:
             minimise_all()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -760,6 +772,8 @@ def main():
             else:
                 speak("I could not understand the reminder")
 
+             
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -779,7 +793,7 @@ def main():
                 speak(f"Snoozed for {minutes} minutes")
             else:
                 speak("Nothing to snooze")
-
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -788,6 +802,7 @@ def main():
                 speak("Alarm stopped")
             else:
                 speak("No active alarm")
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -799,12 +814,14 @@ def main():
                 speak("No reminders set")
             for r in reminders:
                 speak(f"{r['task']} at {r['time']}")
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
 
         elif "morning routine" in text:
             morning_routine()
+            command_handled = True
             log_command("morning routine")
             active = False
             clear_ai_context()
@@ -813,6 +830,7 @@ def main():
 
         elif "evening routine" in text:
             evening_routine()
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
@@ -820,32 +838,31 @@ def main():
         elif "start" in text:
             workflow_name = text.replace("start", "").strip()
             run_workflow(workflow_name)
+            command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
 
         elif "send email" in text:
-                    speak("This action is protected. Please say your PIN.")
-                    WAITING_FOR_PIN = True
-                    PENDING_SECURE_ACTION = ("email", None)
-                    active = False
+            speak("This action is protected. Please say your PIN.")
+            
+            WAITING_FOR_PIN = True
+            PENDING_SECURE_ACTION = ("email", None)
+            active = False
 
-                    # demo email (can be improved later)
-                    to_name = "me"
-                    subject = "Test Email from Jarvis"
-                    body = "Hello Dev, this is a test email sent by Jarvis."
+            # prepare email ONLY (do not send)
+            to_name = "me"
+            subject = "Test Email from Jarvis"
+            body = "Hello Dev, this is a test email sent by Jarvis."
 
-                    msg = em.send_email(to_name, subject, body, speak)
+            msg = em.send_email(to_name, subject, body, speak)
 
-                    if msg:
-                        PENDING_EMAIL = msg
-                        speak("I have prepared the email. Say yes to send it.")
-
-                    active = False
-                    WAITING_FOR_COMMAND = False
-
+            if msg:
+                PENDING_EMAIL = msg
+            command_handled = True
 
         elif "yes" in text:
+
             # 1️⃣ Habit confirmation
             if PENDING_HABIT_ACTION:
                 action = PENDING_HABIT_ACTION
@@ -862,16 +879,14 @@ def main():
 
                 active = False
                 WAITING_FOR_COMMAND = False
+                continue
 
-            # 2️⃣ Email confirmation
-            elif PENDING_EMAIL:
+            # 2️⃣ Email confirmation (ONLY after PIN)
+            if PENDING_EMAIL and EMAIL_PIN_VERIFIED:
                 try:
                     server = smtplib.SMTP("smtp.gmail.com", 587)
                     server.starttls()
-
-                    # replace later with real credentials
-                    server.login("charayadev11@gmail.com", "cfli dshh pktd eltk")
-
+                    server.login(config.EMAIL_USER, config.EMAIL_PASS)
                     server.send_message(PENDING_EMAIL)
                     server.quit()
 
@@ -880,44 +895,71 @@ def main():
                 except Exception:
                     speak("I could not send the email")
 
+                # 🔐 RESET SECURITY STATE (VERY IMPORTANT)
                 PENDING_EMAIL = None
+                EMAIL_PIN_VERIFIED = False
+
                 active = False
                 WAITING_FOR_COMMAND = False
-            
+                continue
 
-            else:
-                speak("There is nothing to confirm")
-                active = False
-                WAITING_FOR_COMMAND=False
+            # 3️⃣ Nothing to confirm
+            speak("There is nothing to confirm")
+            active = False
+            WAITING_FOR_COMMAND = False
+
 
         
+              # 🧠 AI FALLBACK (ONLY IF NO COMMAND MATCHED)
 
-           
-            # prevent junk AI calls
+        # ignore very short inputs
+        if len(text.split()) < 2:
+            speak("Please say a complete question.")
+            active = False
+            go_to_sleep()
+            continue
+
+        print("[AI]: Processing request")
+
+        prompt = build_prompt(text)
+        ai_reply = ask_ai(prompt, idle=is_idle())
+
+        if ai_reply:
+            speak(ai_reply)
+            add_to_context("User", text)
+            add_to_context("AI", ai_reply)
+        else:
+            speak("Sorry, I don't have an answer for that.")
+
+        active = False
+        clear_ai_context()
+        go_to_sleep()
+
+        # 🧠 AI FALLBACK (ONLY IF NO COMMAND MATCHED)
+        if not command_handled:
             if len(text.split()) < 2:
                 speak("Please say a complete question.")
                 active = False
+                go_to_sleep()
                 continue
 
             print("[AI]: Processing request")
 
-
             prompt = build_prompt(text)
             ai_reply = ask_ai(prompt, idle=is_idle())
 
-        
             if ai_reply:
                 speak(ai_reply)
-
                 add_to_context("User", text)
                 add_to_context("AI", ai_reply)
-                clear_ai_context()
-
             else:
                 speak("Sorry, I don't have an answer for that.")
 
             active = False
+            clear_ai_context()
             go_to_sleep()
+           
+            
 
 
         
