@@ -24,9 +24,8 @@ import security_state
 from secure_storage import encrypt
 from secure_storage import decrypt
 from secure_actions import execute_secure_action
-
-
-
+from vision.screen_reader import read_screen
+from language.language_manager import detect_language
 
 
 AI_CONTEXT = []
@@ -85,7 +84,25 @@ def minimise_all():
     speak("All windows minimised")
 
 
+def say_time(lang):
+    time_now = datetime.now().strftime("%I:%M %p")
+    if lang == "hi":
+        speak(f"Abhi samay hai {time_now}")
+    else:
+        speak(f"The current time is {time_now}")
 
+def greet_lang(lang):
+    hour = datetime.now().hour
+
+    if lang == "hi":
+        if hour < 12:
+            speak("Suprabhat, main aapki madad kar sakta hoon")
+        elif hour < 17:
+            speak("Shubh dopahar")
+        else:
+            speak("Shubh sandhya")
+    else:
+        greet()
 
 # time dealing
 
@@ -401,6 +418,7 @@ def main():
     # 🔐 PRIORITY CONFIRMATION (no wake word needed)
         if text:
             text = text.lower()
+            lang = detect_language(text)
             # 🔐 MIC PRIVACY CONTROLS (STEP 3)
             if "disable listening" in text:
                 security_state.LISTENING_ENABLED = False
@@ -437,6 +455,7 @@ def main():
             continue
             
         text = text.lower().strip()# 🔐 HANDLE PIN INPUT FIRST
+        lang = detect_language(text)
         command_handled = False
 
         if WAITING_FOR_PIN:
@@ -516,7 +535,7 @@ def main():
         # what user said
         if "hello" in text:
             print("Command detected: HELLO")
-            greet()
+            greet_lang(lang)
             command_handled = True
             active = False
             clear_ai_context()
@@ -524,7 +543,7 @@ def main():
 
         elif "time" in text:
             print("Command detected: TIME")
-            tell_time()
+            say_time(lang)
             command_handled = True
             active = False
             clear_ai_context()
@@ -843,6 +862,21 @@ def main():
             clear_ai_context()
             go_to_sleep()
 
+        elif "read the screen" in text or "read screen" in text:
+            speak("Reading the screen")
+            content = read_screen()
+
+            if content:
+                speak(content[:300])   # safety limit
+            else:
+                speak("I could not read any text on the screen")
+
+            active = False
+            clear_ai_context()
+            go_to_sleep()
+
+
+
         elif "send email" in text:
             speak("This action is protected. Please say your PIN.")
             
@@ -910,30 +944,8 @@ def main():
 
 
         
-              # 🧠 AI FALLBACK (ONLY IF NO COMMAND MATCHED)
+        # 🧠 AI FALLBACK (ONLY IF NO COMMAND MATCHED)
 
-        # ignore very short inputs
-        if len(text.split()) < 2:
-            speak("Please say a complete question.")
-            active = False
-            go_to_sleep()
-            continue
-
-        print("[AI]: Processing request")
-
-        prompt = build_prompt(text)
-        ai_reply = ask_ai(prompt, idle=is_idle())
-
-        if ai_reply:
-            speak(ai_reply)
-            add_to_context("User", text)
-            add_to_context("AI", ai_reply)
-        else:
-            speak("Sorry, I don't have an answer for that.")
-
-        active = False
-        clear_ai_context()
-        go_to_sleep()
 
         # 🧠 AI FALLBACK (ONLY IF NO COMMAND MATCHED)
         if not command_handled:
