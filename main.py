@@ -26,6 +26,8 @@ from secure_storage import decrypt
 from secure_actions import execute_secure_action
 from vision.screen_reader import read_screen
 from language.language_manager import detect_language
+from code_runner.runner import run_python, run_cpp
+
 
 
 AI_CONTEXT = []
@@ -464,16 +466,32 @@ def main():
             if pin_auth.verify_pin(pin):
                 speak("Access granted.")
 
-                if PENDING_SECURE_ACTION[0] == "email":
+                action = PENDING_SECURE_ACTION[0]
+                value = PENDING_SECURE_ACTION[1]
+
+                # 🔐 EMAIL FLOW
+                if action == "email":
                     EMAIL_PIN_VERIFIED = True
                     speak("I have prepared the email. Say yes to send it.")
+
+                # 💻 RUN PYTHON FILE
+                elif action == "run_python":
+                    output = run_python(value)
+                    speak(output[:300])
+
+                # 💻 RUN C++ FILE
+                elif action == "run_cpp":
+                    output = run_cpp(value)
+                    speak(output[:300])
+
+                # 🖥️ OTHER SECURE SYSTEM ACTIONS
                 else:
-                    execute_secure_action(*PENDING_SECURE_ACTION)
+                    execute_secure_action(action, value)
 
             else:
                 speak("Access denied.")
                 EMAIL_PIN_VERIFIED = False
-                
+
             WAITING_FOR_PIN = False
             PENDING_SECURE_ACTION = None
             active = False
@@ -837,6 +855,33 @@ def main():
             active = False
             clear_ai_context()
             go_to_sleep()
+
+
+        elif "run python file" in text:
+            if pin_auth.is_locked():
+                speak("Access temporarily locked. Try later.")
+                active = False
+                continue
+
+            speak("This action is protected. Please say your PIN.")
+            WAITING_FOR_PIN = True
+            PENDING_SECURE_ACTION = ("run_python", text.replace("run python file", "").strip())
+            active = False
+
+
+        elif "compile c plus plus" in text or "run c plus plus" in text:
+            if pin_auth.is_locked():
+                speak("Access temporarily locked. Try later.")
+                active = False
+                continue
+
+            speak("This action is protected. Please say your PIN.")
+            WAITING_FOR_PIN = True
+            filename = text.replace("compile c plus plus", "").replace("run c plus plus", "").strip()
+            PENDING_SECURE_ACTION = ("run_cpp", filename)
+            active = False
+
+
 
         elif "morning routine" in text:
             morning_routine()
