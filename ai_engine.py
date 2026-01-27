@@ -50,68 +50,48 @@ def warmup_ai():
 
 
 def ask_ai(prompt: str, idle: bool = False) -> str:
-    key = normalize_prompt(prompt)
+
+    if len(prompt.strip().split()) < 2:
+        return "Please ask a complete question."
+
+    key = prompt.lower().strip()
 
     if key in AI_CACHE:
         return AI_CACHE[key]
-    
+
     global LAST_AI_CALL_TIME
-
     now = time.time()
-    if now - LAST_AI_CALL_TIME < AI_COOLDOWN_SECONDS:
-        return "Please wait a moment, I'm thinking."
 
-    LAST_AI_CALL_TIME = now
+    if now - LAST_AI_CALL_TIME < AI_COOLDOWN_SECONDS:
+        return AI_FALLBACK_MESSAGE
+
     try:
-        with requests.post(
+        r = requests.post(
             OLLAMA_URL,
             json={
                 "model": "phi",
                 "prompt": prompt,
-                "stream": True,
-                "options": {
-                    "num_predict": 60 if idle else 60
-                }
+                "stream": False,
+                "options": {"num_predict": 60}
             },
-            stream=True,
             timeout=AI_TIMEOUT
-        ) as r:
+        )
 
-            if r.status_code != 200:
-                return AI_FALLBACK_MESSAGE
+        r.raise_for_status()
 
-            collected = ""
-            start = time.time()
+        data = r.json()
+        final_answer = data.get("response", "").strip()
 
-            for line in r.iter_lines():
-                # stop if timeout reached
-                if time.time() - start > AI_TIMEOUT:
-                    break
+        if final_answer:
+            LAST_AI_CALL_TIME = time.time()
+            AI_CACHE[key] = final_answer
 
-                if not line:
-                    continue
+            if len(AI_CACHE) > MAX_CACHE_SIZE:
+                AI_CACHE.pop(list(AI_CACHE.keys())[0])
 
-                try:
-                    data = json.loads(line.decode("utf-8"))
-                except json.JSONDecodeError:
-                    continue
+            return final_answer
 
-                if "response" in data:
-                    collected += data["response"]
-
-                if len(collected) >= MAX_RESPONSE_CHARS:
-                    break
-
-            final_answer = collected.strip()
-
-            if final_answer:
-                AI_CACHE[key] = final_answer
-
-                if len(AI_CACHE) > MAX_CACHE_SIZE:
-                    AI_CACHE.pop(next(iter(AI_CACHE)))
-
-            return final_answer if final_answer else AI_FALLBACK_MESSAGE
-
+        return AI_FALLBACK_MESSAGE
 
     except Exception:
         return AI_FALLBACK_MESSAGE

@@ -137,7 +137,7 @@ def tell_day():
 
 def open_notepad():
     speak("Opening Notepad")
-    os.system("notepad")
+    subprocess.Popen("notepad")
 
 
 def open_calculator():
@@ -867,6 +867,8 @@ def main():
             WAITING_FOR_PIN = True
             PENDING_SECURE_ACTION = ("run_python", text.replace("run python file", "").strip())
             active = False
+            clear_ai_context()
+            go_to_sleep()
 
 
         elif "compile c plus plus" in text or "run c plus plus" in text:
@@ -880,6 +882,9 @@ def main():
             filename = text.replace("compile c plus plus", "").replace("run c plus plus", "").strip()
             PENDING_SECURE_ACTION = ("run_cpp", filename)
             active = False
+            clear_ai_context()
+            go_to_sleep()
+
 
 
 
@@ -940,6 +945,9 @@ def main():
                 PENDING_EMAIL = msg
             command_handled = True
 
+            clear_ai_context()
+            go_to_sleep()
+
         elif "yes" in text:
 
             # 1️⃣ Habit confirmation
@@ -980,6 +988,7 @@ def main():
 
                 active = False
                 WAITING_FOR_COMMAND = False
+                command_handled = True
                 continue
 
             # 3️⃣ Nothing to confirm
@@ -1026,10 +1035,6 @@ def main():
 if __name__ == "__main__":
     import gui_dashboard
     import threading
-
-    if __name__ == "__main__":
-        # Start JARVIS brain (background)
-        threading.Thread(target=main, daemon=True).start()
-
-        # Start GUI (main thread)
-        gui_dashboard.start_gui()
+     # Start JARVIS brain (background)
+    threading.Thread(target=main, daemon=True).start()
+    gui_dashboard.start_gui()
