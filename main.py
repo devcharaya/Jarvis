@@ -27,6 +27,13 @@ from secure_actions import execute_secure_action
 from vision.screen_reader import read_screen
 from language.language_manager import detect_language
 from code_runner.runner import run_python, run_cpp
+from secure_actions import log_security
+from secure_storage import key_health_check
+
+
+
+
+
 
 
 
@@ -395,6 +402,10 @@ def main():
     
 
     speak(config.WAKE_MESSAGE)
+    
+    if not key_health_check():
+     speak("Encryption key missing. Security risk.")
+
     active = False
 
 
@@ -469,22 +480,45 @@ def main():
                 action = PENDING_SECURE_ACTION[0]
                 value = PENDING_SECURE_ACTION[1]
 
-                # 🔐 EMAIL FLOW
                 if action == "email":
                     EMAIL_PIN_VERIFIED = True
-                    speak("I have prepared the email. Say yes to send it.")
 
-                # 💻 RUN PYTHON FILE
+                    # prepare email AFTER authentication
+                    to_name = "me"
+                    subject = "Test Email from Jarvis"
+                    body = "Hello Dev, this is a test email sent by Jarvis."
+
+                    msg = em.send_email(to_name, subject, body, speak)
+                    if msg:
+                        PENDING_EMAIL = msg
+                        speak("Email prepared. Say yes to send it.")
+                    else:
+                        speak("I could not prepare the email.")
+
+
                 elif action == "run_python":
+                    log_security(f"RUN_PYTHON {value}")   # ✅ ADD
                     output = run_python(value)
                     speak(output[:300])
 
-                # 💻 RUN C++ FILE
                 elif action == "run_cpp":
+                    log_security(f"RUN_CPP {value}")      # ✅ ADD
                     output = run_cpp(value)
                     speak(output[:300])
 
-                # 🖥️ OTHER SECURE SYSTEM ACTIONS
+                elif action == "change_pin":
+                    speak("Say your new PIN")
+                    new_pin = listen_voice()
+                    if new_pin and new_pin.isdigit():
+                        pin_auth.change_pin(new_pin)
+                        speak("PIN changed successfully")
+                    else:
+                        speak("Invalid PIN format")
+
+                elif action == "screen_read":
+                    content = read_screen()
+                    speak(content[:300] if content else "Nothing readable on screen")
+
                 else:
                     execute_secure_action(action, value)
 
@@ -496,6 +530,7 @@ def main():
             PENDING_SECURE_ACTION = None
             active = False
             continue
+
 
 
         
@@ -739,9 +774,7 @@ def main():
             PENDING_SECURE_ACTION = ("restart", None)
             command_handled = True
             active = False
-            clear_ai_context()
-            go_to_sleep()
-
+            
 
         elif "shutdown pc" in text:
             speak("This action is protected. Please say your PIN.")
@@ -766,8 +799,7 @@ def main():
             PENDING_SECURE_ACTION = ("kill", name)
             command_handled = True
             active = False
-            clear_ai_context()
-            go_to_sleep()
+            
 
 
         elif "take screenshot" in text:
@@ -784,6 +816,14 @@ def main():
             active = False
             clear_ai_context()
             go_to_sleep()
+
+        elif "change my pin" in text:
+            speak("Please say your current PIN")
+            WAITING_FOR_PIN = True
+            PENDING_SECURE_ACTION = ("change_pin", None)
+            command_handled = True
+            active = False
+            
 
         
         elif (
@@ -866,9 +906,9 @@ def main():
             speak("This action is protected. Please say your PIN.")
             WAITING_FOR_PIN = True
             PENDING_SECURE_ACTION = ("run_python", text.replace("run python file", "").strip())
+            command_handled = True  
             active = False
-            clear_ai_context()
-            go_to_sleep()
+            
 
 
         elif "compile c plus plus" in text or "run c plus plus" in text:
@@ -881,9 +921,9 @@ def main():
             WAITING_FOR_PIN = True
             filename = text.replace("compile c plus plus", "").replace("run c plus plus", "").strip()
             PENDING_SECURE_ACTION = ("run_cpp", filename)
+            command_handled = True 
             active = False
-            clear_ai_context()
-            go_to_sleep()
+            
 
 
 
@@ -913,40 +953,42 @@ def main():
             go_to_sleep()
 
         elif "read the screen" in text or "read screen" in text:
-            speak("Reading the screen")
-            content = read_screen()
-
-            if content:
-                speak(content[:300])   # safety limit
-            else:
-                speak("I could not read any text on the screen")
-
+            speak("This action is protected. Please say your PIN.")
+            WAITING_FOR_PIN = True
+            PENDING_SECURE_ACTION = ("screen_read", None)
+            command_handled = True
             active = False
-            clear_ai_context()
-            go_to_sleep()
 
 
 
         elif "send email" in text:
             speak("This action is protected. Please say your PIN.")
-            
             WAITING_FOR_PIN = True
             PENDING_SECURE_ACTION = ("email", None)
+            command_handled = True
             active = False
 
-            # prepare email ONLY (do not send)
-            to_name = "me"
-            subject = "Test Email from Jarvis"
-            body = "Hello Dev, this is a test email sent by Jarvis."
+            
 
-            msg = em.send_email(to_name, subject, body, speak)
+            
 
-            if msg:
-                PENDING_EMAIL = msg
+        elif "register my voice" in text:
+            speak("Say your name to register as owner")
+            name = listen_voice()
+            if name:
+                voice_auth.register_owner(name)
+                speak("Voice profile registered")
             command_handled = True
-
-            clear_ai_context()
+            active = False
             go_to_sleep()
+
+        elif "delete my voice profile" in text:
+            voice_auth.delete_owner()
+            speak("Voice profile deleted")
+            command_handled = True
+            active = False
+            go_to_sleep()
+
 
         elif "yes" in text:
 
@@ -970,6 +1012,7 @@ def main():
 
             # 2️⃣ Email confirmation (ONLY after PIN)
             if PENDING_EMAIL and EMAIL_PIN_VERIFIED:
+                log_security("SEND_EMAIL")
                 try:
                     server = smtplib.SMTP("smtp.gmail.com", 587)
                     server.starttls()

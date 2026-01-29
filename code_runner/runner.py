@@ -1,6 +1,8 @@
 import subprocess
 import os
 from datetime import datetime
+from secure_actions import log_security
+
 
 def is_safe_path(base, path):
     return os.path.realpath(path).startswith(os.path.realpath(base))
@@ -29,6 +31,9 @@ def run_python(filename):
 
     if not os.path.exists(file_path):
         return "Python file not found in sandbox."
+
+    log_security(f"RUN_PYTHON {filename}")
+
 
     log_execution("PYTHON_RUN", filename)
 
@@ -61,7 +66,9 @@ def run_cpp(filename):
 
     if not os.path.exists(source_path):
         return "C++ file not found in sandbox."
-
+        
+        
+    log_security(f"RUN_CPP {filename}")
     log_execution("CPP_RUN", filename)
 
     try:

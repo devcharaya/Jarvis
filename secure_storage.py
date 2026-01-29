@@ -30,3 +30,10 @@ def decrypt(token: str) -> str:
         decrypted_bytes.append(encrypted_bytes[i] ^ key[i % len(key)])
 
     return decrypted_bytes.decode()
+
+def encrypt_log_entry(text):
+    return encrypt(text)
+def key_health_check():
+    return SECRET_KEY is not None and len(SECRET_KEY) > 10
+
+

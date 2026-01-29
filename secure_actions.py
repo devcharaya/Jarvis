@@ -1,10 +1,26 @@
+import json
 import os
 import psutil
 from voice_output import speak
+from secure_storage import encrypt   # ✅ correct function
+from datetime import datetime
+
+SECURITY_LOG_FILE = "security_audit.log"
+
+def log_security(event: str):
+    """Log sensitive security actions in encrypted form."""
+    entry = {
+        "time": datetime.now().isoformat(),
+        "event": encrypt(event)   # ✅ now works
+    }
+
+    with open(SECURITY_LOG_FILE, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
 BASE_DIR = os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop")
 
 def delete_file(name):
+    log_security(f"DELETE_FILE {name}")    
     path = os.path.join(BASE_DIR, name)
     if os.path.exists(path):
         os.remove(path)
@@ -13,14 +29,17 @@ def delete_file(name):
         speak("File not found")
 
 def shutdown_pc():
+    log_security("SHUTDOWN")
     speak("Shutting down the system")
     os.system("shutdown /s /t 5")
 
 def restart_pc():
+    log_security("RESTART")
     speak("Restarting the system")
     os.system("shutdown /r /t 5")
 
 def kill_process(name):
+    log_security(f"KILL_PROCESS {name}")
     for proc in psutil.process_iter(['name']):
         if name.lower() in proc.info['name'].lower():
             proc.kill()

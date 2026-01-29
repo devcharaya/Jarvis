@@ -69,3 +69,6 @@ def verify_pin(spoken_pin: str) -> bool:
 
     save_security(data)
     return False
+def change_pin(new_pin: str):
+    set_pin(new_pin)
+
