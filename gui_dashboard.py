@@ -8,6 +8,8 @@ import pyautogui
 import threading
 import tray_manager
 import security_state
+import pin_auth
+
 
 
 
@@ -136,6 +138,16 @@ def start_gui():
         font=("Segoe UI", 11)
     )
     ai_status_label.pack(pady=10)
+
+    security_label = tk.Label(
+    left_frame,
+    text="Security: Secure",
+    fg="lightgreen",
+    bg="#252526",
+    font=("Segoe UI", 11)
+    )
+    security_label.pack(pady=10)
+
 
     # -------------------------
     # QUICK ACTION BUTTONS
@@ -395,6 +407,7 @@ def start_gui():
     update_jarvis_status()
 
 
+
  
 
 
@@ -419,6 +432,18 @@ def start_gui():
         root.after(REFRESH_INTERVAL, update_system_stats)
 
     update_system_stats()
+
+    def update_security_status():
+        if pin_auth.is_locked():
+            security_label.config(text="Security: PIN Locked 🔒", fg="red")
+        else:
+            security_label.config(text="Security: Secure", fg="lightgreen")
+
+        root.after(1000, update_security_status)
+   
+    update_security_status()
+    
+
     
     def update_command_history():
         if not os.path.exists(USAGE_LOG_FILE):

@@ -18,7 +18,7 @@ OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 
 COMMON_FILLER_WORDS = {
     "what", "is", "explain", "tell", "me", "about",
-    "briefly", "in", "detail", "please", "can", "you"
+    "briefly", "in", "detail", "please", "can", "you","why"
 }
 
 
@@ -63,7 +63,7 @@ def ask_ai(prompt: str, idle: bool = False) -> str:
     now = time.time()
 
     if now - LAST_AI_CALL_TIME < AI_COOLDOWN_SECONDS:
-        return AI_FALLBACK_MESSAGE
+     time.sleep(1)
 
     try:
         r = requests.post(
@@ -72,7 +72,11 @@ def ask_ai(prompt: str, idle: bool = False) -> str:
                 "model": "phi",
                 "prompt": prompt,
                 "stream": False,
-                "options": {"num_predict": 60}
+                "options": {
+                            "num_predict": 180,
+                            "temperature": 0.3,
+                            "top_p": 0.9
+                           }
             },
             timeout=AI_TIMEOUT
         )
@@ -81,6 +85,10 @@ def ask_ai(prompt: str, idle: bool = False) -> str:
 
         data = r.json()
         final_answer = data.get("response", "").strip()
+
+        if not final_answer or len(final_answer) < 5:
+            return "I'm thinking... try asking again."
+
 
         if final_answer:
             LAST_AI_CALL_TIME = time.time()

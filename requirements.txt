@@ -1,0 +1,11 @@
+speechrecognition
+pyautogui
+pytesseract
+pillow
+psutil
+pywhatkit
+wikipedia
+requests
+langdetect
+pystray
+deep-translator

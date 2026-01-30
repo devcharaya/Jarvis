@@ -29,8 +29,32 @@ from language.language_manager import detect_language
 from code_runner.runner import run_python, run_cpp
 from secure_actions import log_security
 from secure_storage import key_health_check
+from deep_translator import GoogleTranslator
+from ai_engine import warmup_ai
+warmup_ai()
 
 
+SYSTEM_TRIGGER_WORDS = {
+    "open", "delete", "shutdown", "restart", "run",
+    "kill", "create", "send", "read", "lock",
+    "start", "stop", "screenshot", "folder"
+}
+
+def should_call_ai(text, command_handled):
+    # If a command was already executed → NO AI
+    if command_handled:
+        return False
+
+    # Too short → NO AI
+    if len(text.split()) < 2:
+        return False
+
+    # If system-type words appear → NO AI
+    for word in SYSTEM_TRIGGER_WORDS:
+        if word in text:
+            return False
+
+    return True
 
 
 
@@ -47,6 +71,7 @@ EMAIL_PIN_VERIFIED = False
 
 
 USAGE_LOG_FILE = "usage_log.json"
+EXECUTION_LOG_FILE = "execution_log.json"
 
 PENDING_HABIT_ACTION = None
 LAST_USER_INTERACTION = time.time()
@@ -301,6 +326,30 @@ def log_command(command):
 
     save_usage_log(logs)
 
+def log_execution(file, result, error=None):
+    entry = {
+        "file": file,
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "result": result,
+        "error": error
+    }
+
+    try:
+        if os.path.exists(EXECUTION_LOG_FILE):
+            with open(EXECUTION_LOG_FILE, "r") as f:
+                logs = json.load(f)
+        else:
+            logs = []
+
+        logs.append(entry)
+
+        with open(EXECUTION_LOG_FILE, "w") as f:
+            json.dump(logs, f, indent=2)
+
+    except:
+        pass
+
+
 def analyze_habits():
     logs = load_usage_log()
     stats = {}
@@ -316,6 +365,14 @@ def analyze_habits():
             stats[key] = 1
 
     return stats
+def reset_habits():
+    try:
+        if os.path.exists(USAGE_LOG_FILE):
+            os.remove(USAGE_LOG_FILE)
+        speak("Habit memory reset successfully")
+    except Exception:
+        speak("I could not reset habits")
+
 
 def get_time_context():
     hour = datetime.now().hour
@@ -399,12 +456,15 @@ def main():
     global PENDING_EMAIL   
     global WAITING_FOR_COMMAND   
     global WAITING_FOR_PIN
+    global PENDING_SECURE_ACTION
     
 
     speak(config.WAKE_MESSAGE)
     
     if not key_health_check():
      speak("Encryption key missing. Security risk.")
+    if not config.EMAIL_USER or not config.EMAIL_PASS:
+     speak("Email configuration missing.")
 
     active = False
 
@@ -497,14 +557,25 @@ def main():
 
 
                 elif action == "run_python":
-                    log_security(f"RUN_PYTHON {value}")   # ✅ ADD
-                    output = run_python(value)
-                    speak(output[:300])
+                    log_security(f"RUN_PYTHON {value}")
+                    try:
+                        output = run_python(value)
+                        speak(output[:300])
+                        log_execution(value, "SUCCESS")
+                    except Exception as e:
+                        speak("Execution failed")
+                        log_execution(value, "FAIL", str(e))
 
                 elif action == "run_cpp":
-                    log_security(f"RUN_CPP {value}")      # ✅ ADD
-                    output = run_cpp(value)
-                    speak(output[:300])
+                    log_security(f"RUN_CPP {value}")
+                    try:
+                        output = run_cpp(value)
+                        speak(output[:300])
+                        log_execution(value, "SUCCESS")
+                    except Exception as e:
+                        speak("Execution failed")
+                        log_execution(value, "FAIL", str(e))
+
 
                 elif action == "change_pin":
                     speak("Say your new PIN")
@@ -516,8 +587,11 @@ def main():
                         speak("Invalid PIN format")
 
                 elif action == "screen_read":
-                    content = read_screen()
-                    speak(content[:300] if content else "Nothing readable on screen")
+                    try:
+                        content = read_screen()
+                        speak(content[:300] if content else "Nothing readable on screen")
+                    except Exception:
+                        speak("Screen reading failed")
 
                 else:
                     execute_secure_action(action, value)
@@ -895,6 +969,14 @@ def main():
             active = False
             clear_ai_context()
             go_to_sleep()
+        
+        elif "reset my habits" in text or "clear my habits" in text:
+            reset_habits()
+            command_handled = True
+            active = False
+            clear_ai_context()
+            go_to_sleep()
+
 
 
         elif "run python file" in text:
@@ -1045,7 +1127,7 @@ def main():
 
 
         # 🧠 AI FALLBACK (ONLY IF NO COMMAND MATCHED)
-        if not command_handled:
+        if should_call_ai(text, command_handled):
             if len(text.split()) < 2:
                 speak("Please say a complete question.")
                 active = False
@@ -1054,7 +1136,14 @@ def main():
 
             print("[AI]: Processing request")
 
+            if lang == "hi":
+                try:
+                    text = GoogleTranslator(source="hi", target="en").translate(text)
+                except:
+                    pass
+
             prompt = build_prompt(text)
+
             ai_reply = ask_ai(prompt, idle=is_idle())
 
             if ai_reply:
