@@ -34,6 +34,11 @@ from ai_engine import warmup_ai
 warmup_ai()
 
 
+GREET_WORDS = {
+    "good morning", "good evening", "good afternoon",
+    "hello", "hi", "hey"
+}
+
 SYSTEM_TRIGGER_WORDS = {
     "open", "delete", "shutdown", "restart", "run",
     "kill", "create", "send", "read", "lock",
@@ -41,20 +46,28 @@ SYSTEM_TRIGGER_WORDS = {
 }
 
 def should_call_ai(text, command_handled):
-    # If a command was already executed → NO AI
+
     if command_handled:
         return False
 
-    # Too short → NO AI
-    if len(text.split()) < 2:
-        return False
-
-    # If system-type words appear → NO AI
-    for word in SYSTEM_TRIGGER_WORDS:
+    # 🔹 Block greetings from AI
+    for word in GREET_WORDS:
         if word in text:
             return False
 
+    if len(text.split()) < 2:
+        return False
+
+    if "meaning" in text:
+            return True
+
+
+    for word in SYSTEM_TRIGGER_WORDS:
+        if word in text:
+            return False
+    
     return True
+
 
 
 
@@ -494,10 +507,12 @@ def main():
             lang = detect_language(text)
             # 🔐 MIC PRIVACY CONTROLS (STEP 3)
             if "disable listening" in text:
-                security_state.LISTENING_ENABLED = False
-                speak("Listening disabled")
+                if not security_state.LISTENING_ENABLED:
+                    speak("Listening is already disabled")
+                else:
+                    security_state.LISTENING_ENABLED = False
+                    speak("Listening disabled")
                 continue
-
             if "enable listening" in text:
                 security_state.LISTENING_ENABLED = True
                 speak("Listening enabled")
@@ -589,7 +604,11 @@ def main():
                 elif action == "screen_read":
                     try:
                         content = read_screen()
-                        speak(content[:300] if content else "Nothing readable on screen")
+                        if content:
+                            content = content.replace("\n", " ")
+                            speak(content[:200])
+                        else:
+                            speak("Nothing readable on screen")
                     except Exception:
                         speak("Screen reading failed")
 
@@ -598,6 +617,8 @@ def main():
 
             else:
                 speak("Access denied.")
+                if pin_auth.is_locked():
+                    speak("Too many attempts. Try later.")
                 EMAIL_PIN_VERIFIED = False
 
             WAITING_FOR_PIN = False
@@ -648,8 +669,9 @@ def main():
 
 
             elif not WAITING_FOR_COMMAND:
+                if "routine" in text:
+                    speak("Please say Jarvis first")
                 continue
-
         # ✅ CONFIRMATION SHOULD BYPASS LENGTH FILTER
         if text == "yes" and (PENDING_HABIT_ACTION or PENDING_EMAIL):
             active = True
@@ -660,15 +682,15 @@ def main():
             continue
         
         # what user said
-        if "hello" in text:
-            print("Command detected: HELLO")
+        if any(greet in text for greet in GREET_WORDS):
+            print("Command detected: GREETING")
             greet_lang(lang)
             command_handled = True
             active = False
             clear_ai_context()
             go_to_sleep()
 
-        elif "time" in text:
+        elif "time" in text or "samay" in text :
             print("Command detected: TIME")
             say_time(lang)
             command_handled = True
@@ -1127,7 +1149,7 @@ def main():
 
 
         # 🧠 AI FALLBACK (ONLY IF NO COMMAND MATCHED)
-        if should_call_ai(text, command_handled):
+        if active and should_call_ai(text, command_handled):
             if len(text.split()) < 2:
                 speak("Please say a complete question.")
                 active = False
@@ -1145,16 +1167,14 @@ def main():
             prompt = build_prompt(text)
 
             ai_reply = ask_ai(prompt, idle=is_idle())
-
-            if ai_reply:
+            
+            if not ai_reply or "thinking" in ai_reply.lower():
+                speak("Please try again in a moment.")
+            else:
                 speak(ai_reply)
                 add_to_context("User", text)
                 add_to_context("AI", ai_reply)
-            else:
-                speak("Sorry, I don't have an answer for that.")
-
             active = False
-            clear_ai_context()
             go_to_sleep()
            
             

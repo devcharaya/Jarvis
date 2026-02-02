@@ -8,7 +8,7 @@ def listen_voice():
         with sr.Microphone() as source:
             print("Listening...")
             recognizer.adjust_for_ambient_noise(source, duration=0.5)
-            audio = recognizer.listen(source, timeout=5)
+            audio = recognizer.listen(source, timeout=7, phrase_time_limit=8)
 
         text = recognizer.recognize_google(audio)
         print(f"You said: {text}")
