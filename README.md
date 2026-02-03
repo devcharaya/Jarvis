@@ -328,8 +328,8 @@ It is a **secure, privacy-focused, professional-grade AI desktop system**, built
 
 For issues, questions, or suggestions:
 * Open an issue on GitHub
-* Email: [your-email@example.com]
-* Twitter: [@yourhandle]
+* Email: [charayadev11@gmail.com]
+* Linkedin: [https://www.linkedin.com/in/dev-charaya-186b40314/]
 
 ---
 
