@@ -49,7 +49,9 @@ def read_screen():
         if line:
             lines.append(" ".join(line))
 
-        return "\n".join(lines)
+        text = " ".join(lines)
+        text = text.replace("|", " ").replace("  ", " ")
+        return text[:500] if len(text.strip()) > 10 else None
 
     except Exception as e:
         return f"OCR error: {e}"

@@ -20,6 +20,7 @@ import tray_manager
 import threading
 import voice_auth
 import pin_auth
+import time
 import security_state
 from secure_storage import encrypt
 from secure_storage import decrypt
@@ -45,6 +46,12 @@ SYSTEM_TRIGGER_WORDS = {
     "start", "stop", "screenshot", "folder"
 }
 
+OWNER_VERIFIED = False
+LAST_WAKE_TIME = 0
+
+LAST_AI_CALL_TIME = 0
+AI_MIN_GAP = 3
+
 def should_call_ai(text, command_handled):
 
     if command_handled:
@@ -58,8 +65,8 @@ def should_call_ai(text, command_handled):
     if len(text.split()) < 2:
         return False
 
-    if "meaning" in text:
-            return True
+    if "meaning" in text and not any(w in text for w in SYSTEM_TRIGGER_WORDS):
+     return True
 
 
     for word in SYSTEM_TRIGGER_WORDS:
@@ -133,6 +140,11 @@ def minimise_all():
 
 def say_time(lang):
     time_now = datetime.now().strftime("%I:%M %p")
+    for word in SYSTEM_TRIGGER_WORDS:
+        if word in text:
+            active = False
+            go_to_sleep()   
+            continue
     if lang == "hi":
         speak(f"Abhi samay hai {time_now}")
     else:
@@ -446,10 +458,15 @@ def build_prompt(user_text):
 def go_to_sleep():
     global WAITING_FOR_COMMAND
     global EMAIL_PIN_VERIFIED
+    global OWNER_VERIFIED
+
     WAITING_FOR_COMMAND = False
-    EMAIL_PIN_VERIFIED = False   # 🔐 reset email permission
+    EMAIL_PIN_VERIFIED = False
+    OWNER_VERIFIED = False  # 🔐 reset owner session.
+    clear_ai_context()  
     voice_auth.reset_session()
     print("[SYSTEM]: Jarvis sleeping.")
+
 
 
 
@@ -470,7 +487,9 @@ def main():
     global WAITING_FOR_COMMAND   
     global WAITING_FOR_PIN
     global PENDING_SECURE_ACTION
-    
+    global OWNER_VERIFIED
+    global LAST_WAKE_TIME
+    global LAST_AI_CALL_TIME
 
     speak(config.WAKE_MESSAGE)
     
@@ -519,8 +538,7 @@ def main():
                 continue
 
 
-            if "yes" in text and (PENDING_HABIT_ACTION or PENDING_EMAIL):
-                # simulate active state
+            if "yes" in text and OWNER_VERIFIED and (PENDING_HABIT_ACTION or PENDING_EMAIL):
                 active = True
 
         if (
@@ -541,6 +559,9 @@ def main():
         if not text:
             time.sleep(0.5)
             continue
+
+      
+
             
         text = text.lower().strip()# 🔐 HANDLE PIN INPUT FIRST
         lang = detect_language(text)
@@ -618,7 +639,7 @@ def main():
             else:
                 speak("Access denied.")
                 if pin_auth.is_locked():
-                    speak("Too many attempts. Try later.")
+                    speak("PIN locked for 60 seconds.")
                 EMAIL_PIN_VERIFIED = False
 
             WAITING_FOR_PIN = False
@@ -635,6 +656,7 @@ def main():
             speak(config.EXIT_MESSAGE)
             tray_manager.JARVIS_ACTIVE = False
             active = False
+            OWNER_VERIFIED = False
             WAITING_FOR_COMMAND = False
             voice_auth.reset_session()
             print("[SYSTEM]: JARVIS stopped. GUI still running.")
@@ -644,21 +666,27 @@ def main():
         # Say jarvis Wake up
 # --- Wake word & activation gate ---
         if not active:
-            # allow confirmation without wake word
-            if "yes" in text and (PENDING_HABIT_ACTION or PENDING_EMAIL):
+    # allow confirmation only for owner
+            if "yes" in text and OWNER_VERIFIED and (PENDING_HABIT_ACTION or PENDING_EMAIL):
                 active = True
-            elif config.WAKE_WORD in text:
-                # 🔐 Voice authentication
-                owner = voice_auth.identify_speaker()
 
+            elif config.WAKE_WORD in text:
+
+                # 🟡 WAKE WORD DEBOUNCE (prevents double trigger)
+                if time.time() - LAST_WAKE_TIME < 2:
+                    continue
+                LAST_WAKE_TIME = time.time()
+
+                owner = voice_auth.identify_speaker()
                 if not owner:
                     speak("Unknown voice detected. Access denied.")
                     active = False
                     continue
 
+                OWNER_VERIFIED = True
                 active = True
                 WAITING_FOR_COMMAND = True
-                print("[SYSTEM]: Wake word detected. Jarvis activated.")
+                print("[SYSTEM]: Wake word detected. Owner verified.")
 
                 if not voice_auth.SESSION_GREETED:
                     speak(f"Welcome back {owner}")
@@ -668,15 +696,21 @@ def main():
                     continue
 
 
+
             elif not WAITING_FOR_COMMAND:
                 if "routine" in text:
                     speak("Please say Jarvis first")
                 continue
         # ✅ CONFIRMATION SHOULD BYPASS LENGTH FILTER
-        if text == "yes" and (PENDING_HABIT_ACTION or PENDING_EMAIL):
+        if text == "yes" and OWNER_VERIFIED and (PENDING_HABIT_ACTION or PENDING_EMAIL):
             active = True
 
-        
+        # 🔐 OWNER SESSION ENFORCEMENT
+        if active and not OWNER_VERIFIED:
+            speak("Please authenticate first.")
+            active = False
+            continue
+
         # ignore very short inputs
         if len(text) < 3:
             continue
@@ -687,7 +721,6 @@ def main():
             greet_lang(lang)
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
         elif "time" in text or "samay" in text :
@@ -695,7 +728,6 @@ def main():
             say_time(lang)
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
         elif "date" in text:
@@ -703,7 +735,6 @@ def main():
             tell_date()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
         elif "day" in text:
@@ -711,7 +742,6 @@ def main():
             tell_day()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
         elif "open notepad" in text:
@@ -719,7 +749,6 @@ def main():
             log_command("open notepad")   
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
         elif "open calculator" in text or "open calc" in text:
@@ -727,7 +756,6 @@ def main():
             open_calculator()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -736,7 +764,6 @@ def main():
             cpu_usage()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -745,7 +772,6 @@ def main():
             ram_usage()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -754,7 +780,6 @@ def main():
             battery_status()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
         elif "search google for" in text:
@@ -763,7 +788,6 @@ def main():
             google_search(query)
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -774,7 +798,6 @@ def main():
             youtube_search(query)
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -785,7 +808,6 @@ def main():
             wikipedia_search(query)
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -796,7 +818,6 @@ def main():
             play_song(song)
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
         elif "create folder" in text:
@@ -804,7 +825,6 @@ def main():
             create_folder(folder)
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -813,7 +833,6 @@ def main():
             list_files()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -823,7 +842,6 @@ def main():
             open_folder(folder)
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -850,7 +868,6 @@ def main():
             find_file(file)
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -859,7 +876,6 @@ def main():
             lock_pc()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -884,7 +900,6 @@ def main():
             list_processes()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -902,7 +917,6 @@ def main():
             take_screenshot()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -910,7 +924,6 @@ def main():
             minimise_all()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
         elif "change my pin" in text:
@@ -948,7 +961,6 @@ def main():
              
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
         elif "snooze" in text:
@@ -968,7 +980,6 @@ def main():
                 speak("Nothing to snooze")
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
         elif "stop alarm" in text or "dismiss alarm" in text:
             if rm.stop_alarm():
@@ -977,7 +988,6 @@ def main():
                 speak("No active alarm")
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -989,14 +999,12 @@ def main():
                 speak(f"{r['task']} at {r['time']}")
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
         
         elif "reset my habits" in text or "clear my habits" in text:
             reset_habits()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -1037,7 +1045,6 @@ def main():
             command_handled = True
             log_command("morning routine")
             active = False
-            clear_ai_context()
             go_to_sleep()
 
 
@@ -1045,7 +1052,6 @@ def main():
             evening_routine()
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
         elif "start" in text:
@@ -1053,7 +1059,6 @@ def main():
             run_workflow(workflow_name)
             command_handled = True
             active = False
-            clear_ai_context()
             go_to_sleep()
 
         elif "read the screen" in text or "read screen" in text:
@@ -1156,6 +1161,15 @@ def main():
                 go_to_sleep()
                 continue
 
+            if time.time() - LAST_AI_CALL_TIME < AI_MIN_GAP:
+                speak("One moment...")
+                active = False
+                go_to_sleep()
+                continue
+
+            LAST_AI_CALL_TIME = time.time()
+
+
             print("[AI]: Processing request")
 
             if lang == "hi":
@@ -1167,9 +1181,10 @@ def main():
             prompt = build_prompt(text)
 
             ai_reply = ask_ai(prompt, idle=is_idle())
+            time.sleep(1.2)
             
-            if not ai_reply or "thinking" in ai_reply.lower():
-                speak("Please try again in a moment.")
+            if not ai_reply or len(ai_reply.strip()) < 5:
+                speak("I did not get a clear answer. Please try again.")
             else:
                 speak(ai_reply)
                 add_to_context("User", text)
