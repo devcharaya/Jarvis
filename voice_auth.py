@@ -14,24 +14,6 @@ def load_security():
         return json.load(f)
 
 
-def identify_speaker():
-    global SESSION_OWNER
-
-    security = load_security()
-    if not security:
-        return None
-
-    owner_name = security.get("owner_name")
-
-    if SESSION_OWNER is None:
-        SESSION_OWNER = owner_name
-        return owner_name
-
-    if SESSION_OWNER == owner_name:
-        return owner_name
-
-    return None
-
 
 def reset_session():
     global SESSION_OWNER
@@ -61,3 +43,8 @@ def delete_owner():
 
     with open(SECURITY_FILE, "w") as f:
         json.dump(data, f, indent=2)
+
+SECRET_PHRASE = "I am the owner"
+
+def verify_voice_phrase(spoken_text: str) -> bool:
+    return SECRET_PHRASE.lower() in spoken_text.lower()

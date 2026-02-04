@@ -32,6 +32,7 @@ from secure_actions import log_security
 from secure_storage import key_health_check
 from deep_translator import GoogleTranslator
 from ai_engine import warmup_ai
+from speaker_recognition import verify_speaker
 warmup_ai()
 
 
@@ -140,11 +141,6 @@ def minimise_all():
 
 def say_time(lang):
     time_now = datetime.now().strftime("%I:%M %p")
-    for word in SYSTEM_TRIGGER_WORDS:
-        if word in text:
-            active = False
-            go_to_sleep()   
-            continue
     if lang == "hi":
         speak(f"Abhi samay hai {time_now}")
     else:
@@ -463,7 +459,6 @@ def go_to_sleep():
     WAITING_FOR_COMMAND = False
     EMAIL_PIN_VERIFIED = False
     OWNER_VERIFIED = False  # 🔐 reset owner session.
-    clear_ai_context()  
     voice_auth.reset_session()
     print("[SYSTEM]: Jarvis sleeping.")
 
@@ -523,7 +518,6 @@ def main():
     # 🔐 PRIORITY CONFIRMATION (no wake word needed)
         if text:
             text = text.lower()
-            lang = detect_language(text)
             # 🔐 MIC PRIVACY CONTROLS (STEP 3)
             if "disable listening" in text:
                 if not security_state.LISTENING_ENABLED:
@@ -541,14 +535,15 @@ def main():
             if "yes" in text and OWNER_VERIFIED and (PENDING_HABIT_ACTION or PENDING_EMAIL):
                 active = True
 
-        if (
+            if (
+                OWNER_VERIFIED and
                 not active and
                 not WAITING_FOR_COMMAND and
                 not PENDING_HABIT_ACTION and
                 not PENDING_EMAIL and
                 is_idle()
             ):
-               habit_suggestions()
+                habit_suggestions()
         
         if text:
             LAST_USER_INTERACTION = time.time()
@@ -564,11 +559,20 @@ def main():
 
             
         text = text.lower().strip()# 🔐 HANDLE PIN INPUT FIRST
+
+        # 🛑 Prevent AI self-trigger loop (VERY IMPORTANT)
+        if (
+            not OWNER_VERIFIED
+            and "jarvis" in text
+            and time.time() - LAST_AI_CALL_TIME < 2
+        ):
+            continue
+
         lang = detect_language(text)
         command_handled = False
 
         if WAITING_FOR_PIN:
-            pin = text.strip()
+            pin = "".join(filter(str.isdigit, text))
 
             if pin_auth.verify_pin(pin):
                 speak("Access granted.")
@@ -633,11 +637,23 @@ def main():
                     except Exception:
                         speak("Screen reading failed")
 
+
+                elif action == "register_voice":
+                    speak("Say your name to register as owner")
+                    name = listen_voice()
+                    if name:
+                        voice_auth.register_owner(name)
+                        speak("Voice profile registered successfully")
+                    else:
+                        speak("Registration failed")
+
+
                 else:
                     execute_secure_action(action, value)
 
             else:
                 speak("Access denied.")
+                time.sleep(2)
                 if pin_auth.is_locked():
                     speak("PIN locked for 60 seconds.")
                 EMAIL_PIN_VERIFIED = False
@@ -677,20 +693,17 @@ def main():
                     continue
                 LAST_WAKE_TIME = time.time()
 
-                owner = voice_auth.identify_speaker()
-                if not owner:
-                    speak("Unknown voice detected. Access denied.")
+                if not verify_speaker():
+                    speak("Voice not recognized. Access denied.")
                     active = False
                     continue
 
                 OWNER_VERIFIED = True
                 active = True
                 WAITING_FOR_COMMAND = True
-                print("[SYSTEM]: Wake word detected. Owner verified.")
+                print("[SYSTEM]: Owner verified.")
 
-                if not voice_auth.SESSION_GREETED:
-                    speak(f"Welcome back {owner}")
-                    voice_auth.SESSION_GREETED = True
+                speak("Welcome back")
 
                 if text.strip() == config.WAKE_WORD:
                     continue
@@ -1082,14 +1095,11 @@ def main():
             
 
         elif "register my voice" in text:
-            speak("Say your name to register as owner")
-            name = listen_voice()
-            if name:
-                voice_auth.register_owner(name)
-                speak("Voice profile registered")
+            speak("This action is protected. Please say your PIN.")
+            WAITING_FOR_PIN = True
+            PENDING_SECURE_ACTION = ("register_voice", None)
             command_handled = True
             active = False
-            go_to_sleep()
 
         elif "delete my voice profile" in text:
             voice_auth.delete_owner()
@@ -1171,12 +1181,18 @@ def main():
 
 
             print("[AI]: Processing request")
+            if any(word in text for word in SYSTEM_TRIGGER_WORDS):
+                active = False
+                go_to_sleep()
+                continue
 
+           
+           
             if lang == "hi":
                 try:
                     text = GoogleTranslator(source="hi", target="en").translate(text)
                 except:
-                    pass
+                    speak("Translation failed. Answering in English.")
 
             prompt = build_prompt(text)
 

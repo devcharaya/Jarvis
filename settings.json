@@ -1,7 +1,7 @@
 {
-    "voice_enabled": false,
+    "voice_enabled": true,
     "ai_enabled": true,
-    "ai_response_length": 150,
-    "ai_cooldown": 15,
-    "default_workflow": "work"
+    "ai_response_length": 60,
+    "ai_cooldown": 5,
+    "default_workflow": "study"
 }
